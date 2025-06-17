@@ -1,17 +1,69 @@
 import rclpy
 import time
 import math, csv
+import os
 from datetime import datetime
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import String, UInt8, Bool
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
 from autoware_vehicle_msgs.msg import Engage
 from autoware_planning_msgs.msg import Trajectory
 from autoware_adapi_v1_msgs.msg import OperationModeState
+from autoware_system_msgs.msg import AutowareState
+from launch.logging import launch_config
 
 VL_FILENAME = "vehicle_position_log.csv"
 PL_FILENAME = "planning_log.csv"
+
+class LoggingNode(Node):
+    def __init__(self):
+        super().__init__('my_logging_node')
+
+        # Setting log files.
+        self.declare_parameter('supervise_log_dir', launch_config.log_dir)
+        ld = self.get_parameter('supervise_log_dir').get_parameter_value().string_value
+        self.get_logger().info(f"Preparing: {os.path.join(ld, VL_FILENAME)}")
+        self.vlf = open(os.path.join(ld, VL_FILENAME), 'w')
+        self.plf = open(os.path.join(ld, PL_FILENAME), 'w')
+
+        #self.get_logger().set_level(rclpy.logging.LoggingSeverity.ERROR)
+        self.get_logger().set_level(rclpy.logging.LoggingSeverity.INFO)
+        self.sub_vehicle_log = self.create_subscription(
+            Odometry, '/localization/kinematic_state', 
+            self.vehicle_log_cb, 10)
+        self.sub_planning_log = self.create_subscription(
+            Trajectory, '/planning/scenario_planning/trajectory', 
+            self.planning_log_cb, 10)
+
+
+    def __del__(self):
+        self.get_logger().info('Dying...')
+        self.vlf.close()
+        self.plf.close()
+        self.get_logger().info('done')
+
+    def vehicle_log_cb(self, msg):
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        ori = msg.pose.pose.orientation
+        yaw = quaternion_to_yaw(ori.x, ori.y, ori.z, ori.w)
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        csv.writer(self.vlf).writerow([ts, x, y, yaw])
+
+    def planning_log_cb(self, msg):
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        writer = csv.writer(self.plf)
+        for pt in msg.points:
+            x = pt.pose.position.x
+            y = pt.pose.position.y
+            ori = pt.pose.orientation
+            yaw = quaternion_to_yaw(ori.x, ori.y, ori.z, ori.w)
+            v = pt.longitudinal_velocity_mps
+            writer.writerow([ts, x, y, yaw, v])
+
+#
 
 def quaternion_to_yaw(x, y, z, w):
     siny_cosp = 2 * (w * z + x * y)
@@ -21,21 +73,6 @@ def quaternion_to_yaw(x, y, z, w):
 class PlanningTask(Node):
     def __init__(self):
         super().__init__('planning_task_node')
-
-        #self.vlf = open(VL_FILENAME, 'w')
-        #self.plf = open(PL_FILENAME, 'w')
-
-        #self.get_logger().set_level(rclpy.logging.LoggingSeverity.ERROR)
-        self.get_logger().set_level(rclpy.logging.LoggingSeverity.INFO)
-        #self.sub_vehicle_log = self.create_subscription(
-        #    Odometry, '/localization/kinematic_state', 
-        #    self.vehicle_log_cb, 10)
-        #self.sub_planning_log = self.create_subscription(
-        #    Trajectory, '/planning/scenario_planning/trajectory', 
-        #    self.planning_log_cb, 10)
-        self.sub_state = self.create_subscription(
-            OperationModeState, '/api/operation_mode/state', self.state_cb, 10)
-        self.current = None
 
         self.pub_init = self.create_publisher(
             PoseWithCovarianceStamped, '/initialpose', 10)
@@ -51,16 +88,25 @@ class PlanningTask(Node):
         self.publish_init_pose()
         self.publish_goal_pose()
 
-        # Publish the engage msg.
-        msg = Engage()
-        msg.engage = True
-        self.publish(self.pub_engage, msg)
+        #
 
-    def __del__(self):
-        self.get_logger().info('Dying...')
-        #self.vlf.close()
-        #self.plf.close()
-        self.get_logger().info('done')
+        #self.sub_state = self.create_subscription(
+        #    OperationModeState, '/api/operation_mode/state', self.op_mode_cb, 10)
+        #self.current = None
+        self.sub_a_state = self.create_subscription(
+            AutowareState, '/autoware/state', self.state_cb, 10)
+
+        #time.sleep(3)
+        ## Publish the engage msg.
+        #msg = Engage()
+        #msg.engage = True
+        #self.publish(self.pub_engage, msg)
+
+    #def __del__(self):
+    #    self.get_logger().info('Dying...')
+    #    self.vlf.close()
+    #    self.plf.close()
+    #    self.get_logger().info('done')
 
     def publish(self, pub, msg):
         while pub.get_subscription_count() == 0:
@@ -124,46 +170,66 @@ class PlanningTask(Node):
 
     def vehicle_log_cb(self, msg):
         x = msg.pose.pose.position.x
-        #y = msg.pose.pose.position.y
-        #ori = msg.pose.pose.orientation
-        #yaw = quaternion_to_yaw(ori.x, ori.y, ori.z, ori.w)
-        #ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ##with open(self.filename, 'a') as f:
-        ##    csv.writer(f).writerow([ts, x, y, yaw])
-        #csv.writer(self.vlf).writerow([ts, x, y, yaw])
+        y = msg.pose.pose.position.y
+        ori = msg.pose.pose.orientation
+        yaw = quaternion_to_yaw(ori.x, ori.y, ori.z, ori.w)
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        csv.writer(self.vlf).writerow([ts, x, y, yaw])
 
     def planning_log_cb(self, msg):
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ##with open(self.filename, 'a') as f:
-        ##    writer = csv.writer(f)
-        #writer = csv.writer(self.plf)
-        #for pt in msg.points:
-        #    x = pt.pose.position.x
-        #    y = pt.pose.position.y
-        #    ori = pt.pose.orientation
-        #    yaw = quaternion_to_yaw(ori.x, ori.y, ori.z, ori.w)
-        #    v = pt.longitudinal_velocity_mps
-        #    writer.writerow([ts, x, y, yaw, v])
+        writer = csv.writer(self.plf)
+        for pt in msg.points:
+            x = pt.pose.position.x
+            y = pt.pose.position.y
+            ori = pt.pose.orientation
+            yaw = quaternion_to_yaw(ori.x, ori.y, ori.z, ori.w)
+            v = pt.longitudinal_velocity_mps
+            writer.writerow([ts, x, y, yaw, v])
+
+    #def op_mode_cb(self, msg):
+    #    prev = self.current
+    #    self.current = msg.mode
+    #    self.get_logger().info(f"op mode: {msg.mode}")
+    #    if prev is not None and prev > 1 and self.current == 1:
+    #        self.get_logger().info("Shutting down node ...")
+    #        msg = Bool()
+    #        msg.data = True
+    #        self.publish(self.pub_done, msg)
 
     def state_cb(self, msg):
-        prev = self.current
-        self.current = msg.mode
-        self.get_logger().info(f"mode: {msg.mode}")
-        if prev is not None and prev > 1 and self.current == 1:
+        #self.get_logger().info(f"state: {msg.state}")
+        if msg.state == AutowareState.WAITING_FOR_ENGAGE:
+            # Publish the engage msg.
+            msg = Engage()
+            msg.engage = True
+            self.publish(self.pub_engage, msg)
+        elif msg.state >= AutowareState.ARRIVED_GOAL:
             self.get_logger().info("Shutting down node ...")
             msg = Bool()
             msg.data = True
             self.publish(self.pub_done, msg)
 
-            #self.destroy_node()
-            #rclpy.shutdown()
-
 def main():
     rclpy.init()
-    node = PlanningTask()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+
+    #node = PlanningTask()
+    #rclpy.spin(node)
+    #node.destroy_node()
+    #rclpy.shutdown()
+
+    pt_node = PlanningTask()
+    log_node = LoggingNode()
+
+    executor = MultiThreadedExecutor()
+    executor.add_node(pt_node)
+    executor.add_node(log_node)
+    try:
+        executor.spin()
+    finally:
+        pt_node.destroy_node()
+        log_node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
    main()

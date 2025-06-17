@@ -47,6 +47,8 @@
     description="Select localization mode. Options are 'none', 'api' or 'pose_twist_estimator'. 'pose_twist_estimator' starts most of the localization modules except for the ndt_scan_matcher. 'api' starts an external API for initial position estimation. 'none' does not start any localization-related process."
   />
 
+  <arg name="supervise_log_dir" default="$(env HOME)/autoware_data/log" description="log dir for the supervisor"/>
+
   <group scoped="false">
     <!-- Vehicle -->
     <let name="launch_vehicle_interface" value="false" if="$(var vehicle_simulation)"/>
@@ -115,9 +117,9 @@
   <node
     pkg="autoware_planning_supervisor"
     exec="planning_task"
-    name="planning_task"
     output="screen"
   >
+    <param name="supervise_log_dir" value="$(var supervise_log_dir)"/>
     <param name="exit_on_shutdown" value="true"/>
-   </node>
+  </node>
 </launch>

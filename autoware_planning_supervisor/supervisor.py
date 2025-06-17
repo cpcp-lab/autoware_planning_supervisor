@@ -3,6 +3,8 @@ import asyncio
 import threading
 import time
 import rclpy
+import argparse
+import datetime
 from launch import LaunchService
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.actions import IncludeLaunchDescription
@@ -10,6 +12,7 @@ from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from std_msgs.msg import Bool
 
+# Lister for the done topic for planning tasks.
 class ListenerNode(Node):
     def __init__(self):
         super().__init__('supervisor_node')
@@ -22,7 +25,7 @@ class ListenerNode(Node):
         launch_service.shutdown()
 
 def start_rclpy_listener():
-    time.sleep(1)
+    #time.sleep(1)
 
     rclpy.init()
     node = ListenerNode()
@@ -43,7 +46,8 @@ launch_file_path = os.path.join(
 
 launch_service = None
 
-async def launch():
+# Execute the planning task by adding to LaunchService.
+async def launch(log_dir):
     global launch_service
     launch_service = LaunchService()
 
@@ -55,7 +59,8 @@ async def launch():
         launch_arguments={
             'map_path': '/autoware_map/sample-map-planning',
             'vehicle_model': 'sample_vehicle',
-            'sensor_model': 'sample_sensor_kit'
+            'sensor_model': 'sample_sensor_kit',
+            'supervise_log_dir': log_dir
             }.items()
     )
     launch_service.include_launch_description(included_launch)
@@ -65,14 +70,39 @@ async def launch():
     print("A launch service finished.")
     await asyncio.sleep(3)
 
-# Execute it by adding to LaunchService.
+#
+
 def main():
+    # Setting the argument parser.
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--log_dir', type=str, help='Specify the log dir')
+    args = parser.parse_args()
+
+    log_base = args.log_dir
+    if not log_base or not os.path.isdir(log_base):
+        log_base = os.get_env("ROS_LOG_DIR")
+    
+    now = datetime.datetime.now()
+    datetime_str = now.strftime('%Y-%m-%d-%H-%M-%S')
+
+    # Invoke the listener node.
     t = threading.Thread(target=start_rclpy_listener)
     t.start()
 
     try:
+        i = 0
         while True:
-            asyncio.run( launch() )
+            # Create a subdir for logging.
+            while True:
+                i += 1
+                dirname = f"supervise-{datetime_str}-{i}"
+                log_dir = os.path.join(log_base, dirname)
+                if not os.path.exists(log_dir):
+                    os.mkdir(log_dir)
+                    break
+
+            asyncio.run( launch(log_dir) )
+
     except KeyboardInterrupt:
         print("Interrupted. Finishing the process.")
 
