@@ -2,12 +2,12 @@
 
 This repository provides ROS2 nodes and Python scripts for automating Autoware planning tasks.
 
-## Environment
+## Tested Environment
 
 - Autoware AD Kit (commit `6290501`)
 - Python 3.10.12
 
-## Installation
+## How to Build
 
 ```shell
 $ ls
@@ -19,7 +19,7 @@ Finished <<< autoware_planning_supervisor [0.55s]
 Summary: 1 package finished [0.68s]
 ```
 
-## Example
+## Execusion Example
 
 ```shell
 $ source install/setup.bash
